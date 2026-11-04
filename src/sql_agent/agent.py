@@ -92,6 +92,7 @@ def run_agent(
                 "tool_calls": [
                     {"id": c.id, "name": c.name, "args": c.args} for c in turn.tool_calls
                 ],
+                "raw": turn.raw,
             }
         )
         log(
@@ -102,6 +103,7 @@ def run_agent(
                 "tool_calls": [{"name": c.name, "args": c.args} for c in turn.tool_calls],
                 "input_tokens": turn.input_tokens,
                 "output_tokens": turn.output_tokens,
+                "served_model": turn.served_model,
             }
         )
 

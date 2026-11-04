@@ -7,14 +7,15 @@
 각 어댑터가 이 형식을 해당 API 형식으로 바꾼다.
 
 - ScriptedModel: 정해진 순서대로 도구를 부르는 가짜 모델. API 키 없이 루프·도구·평가를 테스트한다.
-- (2주차) Claude 어댑터, (이후) Ollama 어댑터
+- ClaudeModel (claude.py): Anthropic Messages API
+- (이후) Ollama 어댑터
 """
 
 from __future__ import annotations
 
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
-from typing import Protocol
+from typing import Any, Protocol
 
 from .tools import Tool
 
@@ -32,6 +33,8 @@ class ModelTurn:
     tool_calls: list[ToolCall] = field(default_factory=list)
     input_tokens: int = 0
     output_tokens: int = 0
+    raw: Any = None  # 제공자 원본 응답 블록 (다음 요청에 그대로 돌려보내야 하는 경우)
+    served_model: str | None = None  # 실제로 응답한 모델 (대체 모델로 넘어간 경우 확인용)
 
 
 class Model(Protocol):

@@ -78,3 +78,19 @@ def test_stops_after_repeated_failures(tmp_path, monkeypatch):
     rc = fa.main(["--start", "202401", "--end", "202412", "--out", str(tmp_path)])
     report = json.loads((tmp_path / "fetch_report.json").read_text(encoding="utf-8"))
     assert rc == 1 and len(report["errors"]) == 3
+
+
+# GitHub Actions에서 잘못된 키로 실제 API를 호출했을 때 받은 응답 (2026-11-04)
+REAL_INVALID_KEY_RESPONSE = """<?xml version="1.0" encoding="UTF-8"?>
+<OpenAPI_ServiceResponse>
+<cmmMsgHeader>
+  <errMsg>SERVICE_KEY_IS_NOT_REGISTERED_ERROR</errMsg>
+  <returnAuthMsg>등록되지 않은 서비스키</returnAuthMsg>
+  <returnReasonCode>30</returnReasonCode>
+</cmmMsgHeader>
+</OpenAPI_ServiceResponse>"""
+
+
+def test_real_invalid_key_response():
+    with pytest.raises(fa.ApiError, match="30.*등록되지 않은 서비스키"):
+        fa.parse_page(REAL_INVALID_KEY_RESPONSE)

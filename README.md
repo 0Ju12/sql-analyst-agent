@@ -3,13 +3,13 @@
 데이터에 대해 질문하면 에이전트가 테이블을 살펴보고, SQL을 짜서 **실행 전에 검사**하고, 오류가 나면 스스로 고쳐서
 근거 SQL과 함께 답하는 데이터 분석 에이전트입니다. 같은 과정을 질문 세트로 **평가**합니다.
 
-> 진행 상황: 1주차. 도구·안전장치·에이전트 루프·채점기와 평가 문항 30개를 만들고, 테스트용 가짜 모델로 검증했습니다.
-> 실제 LLM 연결과 실제 모델 평가는 아직 하지 않았습니다.
+> 진행 상황: 도구·안전장치·에이전트 루프·채점기·평가 문항 30개·Claude 어댑터까지 만들고, 가짜 모델·가짜 클라이언트로 검증했습니다.
+> 실제 Claude 모델로 돌린 평가 결과는 아직 없습니다.
 
 ## 구조
 
 ```
-질문 → [에이전트 루프] ⇄ 모델 (테스트용 ScriptedModel / 이후 Claude·Ollama)
+질문 → [에이전트 루프] ⇄ 모델 (Claude / 테스트용 ScriptedModel / 이후 Ollama)
             ├─ list_tables      테이블 목록
             ├─ describe_table   컬럼·자료형·행 수·예시 5행
             ├─ check_sql        실행 없이 검사
@@ -27,6 +27,7 @@
 | `src/sql_agent/sql_guard.py` | sqlglot 기반 SQL 검사 |
 | `src/sql_agent/db.py` | 읽기 전용 DuckDB 연결, 시간 제한·행 수 제한 실행 |
 | `src/sql_agent/models.py` | 모델 공통 인터페이스, 테스트용 ScriptedModel |
+| `src/sql_agent/claude.py` | Claude 어댑터 (Messages API 수동 도구 루프) |
 | `src/sql_agent/evaluate.py` | 질문 세트 실행·채점·요약 보고서 |
 | `src/sql_agent/load.py` | CSV → DuckDB 적재 (manifest YAML) |
 
@@ -105,10 +106,24 @@ sql-agent --db data/warehouse.duckdb check "select nam from customers"
 sql-agent --db data/warehouse.duckdb run "select city, count(*) from customers group by city"
 ```
 
+### Claude로 실행
+
+```bash
+pip install -e '.[claude]'
+export ANTHROPIC_API_KEY=...   # 셸 환경변수로만. 파일에 쓰지 않기
+sql-agent --db data/chinook.duckdb ask "장르별 판매 금액 상위 3개는?"
+sql-agent --db data/chinook.duckdb eval eval/chinook_tasks.yaml --effort medium
+```
+
+- 기본 모델 `claude-opus-5-5`, effort `medium`. `--model`, `--effort`로 바꿉니다.
+- 안전 분류기가 요청을 거절하면 서버 쪽 대체 모델이 이어받습니다(`fallbacks: "default"`). 끄려면 `--no-fallbacks`. 실제로 응답한 모델은 실행 기록의 `served_model`에 남습니다.
+- 모델 응답 블록은 다음 요청에 그대로 돌려보내고, 대화 기록은 덧붙이기만 합니다. 도구 정의와 시스템 프롬프트는 프롬프트 캐시를 씁니다.
+- GitHub Actions의 "에이전트 평가" 워크플로로도 돌릴 수 있습니다(저장소 Secrets의 `ANTHROPIC_API_KEY` 사용, 결과는 Actions 결과물로 저장).
+
 ## 다음 단계
 
 - 실거래가 첫 수집 후 정리 단계와 한국어 평가 문항
-- Claude 모델 어댑터 연결 (API 키는 저장소 Secrets / 환경변수로만), 실제 평가 실행
+- 실제 Claude 모델 평가 실행 (effort별 비교)
 - 틀린 문항 분석과 개선, 로컬 모델(Ollama) 비교
 
 ## 저장소 규칙

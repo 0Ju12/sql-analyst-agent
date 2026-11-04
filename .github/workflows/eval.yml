@@ -1,0 +1,50 @@
+name: 에이전트 평가
+
+# 수동 실행: Actions 탭 → "에이전트 평가" → Run workflow
+# 필요: 저장소 Secrets에 ANTHROPIC_API_KEY
+on:
+  workflow_dispatch:
+    inputs:
+      model:
+        description: 모델 ID
+        default: claude-opus-5-5
+      effort:
+        description: low / medium / high / xhigh / max
+        default: medium
+      only:
+        description: 문항 id (쉼표 구분, 비우면 전체)
+        default: ""
+      limit:
+        description: 앞에서부터 N문항만 (0이면 전체)
+        default: "0"
+
+permissions:
+  contents: read
+
+jobs:
+  eval:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install -e '.[claude]'
+      - run: python scripts/fetch_chinook.py
+      - name: 평가
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+        run: |
+          if [ -z "$ANTHROPIC_API_KEY" ]; then echo "ANTHROPIC_API_KEY가 없습니다."; exit 2; fi
+          sql-agent --db data/chinook.duckdb eval eval/chinook_tasks.yaml \
+            --model "${{ inputs.model }}" --effort "${{ inputs.effort }}" \
+            --only "${{ inputs.only }}" --limit "${{ inputs.limit }}" --out runs/latest
+          cat runs/latest/summary.md >> "$GITHUB_STEP_SUMMARY"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: eval-${{ inputs.model }}-${{ inputs.effort }}-${{ github.run_id }}
+          path: runs/latest/
+          if-no-files-found: warn
+          retention-days: 30
