@@ -166,7 +166,23 @@ class GitHubModel:
 
 def list_models(token: str | None = None) -> list[dict]:
     token = token or os.environ.get("GITHUB_TOKEN", "")
-    req = urllib.request.Request(CATALOG, headers={"Authorization": f"Bearer {token}",
-                                                   "Accept": "application/json"})  # fmt: skip
-    with urllib.request.urlopen(req, timeout=30) as r:
-        return json.loads(r.read().decode("utf-8"))
+    req = urllib.request.Request(
+        CATALOG,
+        headers={"Authorization": f"Bearer {token}", "Accept": "application/vnd.github+json",
+                 "X-GitHub-Api-Version": "2022-11-28"},
+    )  # fmt: skip
+    try:
+        with urllib.request.urlopen(req, timeout=30) as r:
+            raw, status, ctype = (
+                r.read().decode("utf-8", "replace"),
+                r.status,
+                r.headers.get("content-type"),
+            )
+    except urllib.error.HTTPError as e:
+        raise GitHubModelsError(f"HTTP {e.code}: {e.read()[:300]!r}") from None
+    try:
+        return json.loads(raw)
+    except json.JSONDecodeError:
+        raise GitHubModelsError(
+            f"JSON이 아닌 응답 (HTTP {status}, {ctype}): {raw[:300]!r}"
+        ) from None
