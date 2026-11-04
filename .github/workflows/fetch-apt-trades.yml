@@ -36,6 +36,11 @@ jobs:
           args="--start ${{ inputs.start }} --end ${{ inputs.end }}"
           if [ -n "${{ inputs.regions }}" ]; then args="$args --regions ${{ inputs.regions }}"; fi
           python scripts/fetch_apt_trades.py $args
+      - name: 수집 결과 요약 (로그)
+        if: always()
+        run: |
+          [ -f data/raw/apt/fetch_report.json ] && python -c "import json;r=json.load(open('data/raw/apt/fetch_report.json'));print('총', r.get('total_rows'), '건 / 오류', len(r['errors']));[print(e) for e in r['errors'][:10]]"
+          [ -f data/raw/apt/apt_trades.csv ] && python scripts/summarize_csv.py data/raw/apt/apt_trades.csv || true
       - name: 결과 올리기
         if: always()
         uses: actions/upload-artifact@v4
