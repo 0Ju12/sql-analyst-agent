@@ -1,0 +1,17 @@
+name: probe
+on:
+  push:
+    branches: [probe-network]
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    steps:
+      - run: |
+          for u in "https://apis.data.go.kr/1613000/RTMSDataSvcAptTrade/getRTMSDataSvcAptTrade?serviceKey=x&LAWD_CD=11110&DEAL_YMD=202401" \
+                   "https://apis.data.go.kr/1613000/RTMSDataSvcAptTradeDev/getRTMSDataSvcAptTradeDev?serviceKey=x&LAWD_CD=11110&DEAL_YMD=202401" \
+                   "http://openapi.seoul.go.kr:8088/sample/xml/bikeList/1/5/" \
+                   "http://openapi.seoul.go.kr:8088/sample/json/tbCycleRentUseDayInfo/1/5/20240101" \
+                   https://data.seoul.go.kr/ https://rt.molit.go.kr/ https://www.data.go.kr/ https://kosis.kr/; do
+            echo "=== $u"
+            curl -s -m 20 -w "\nHTTP %{http_code}\n" "$u" | head -c 700; echo
+          done
