@@ -105,6 +105,9 @@ def score(task: Task, result: AgentResult, con, catalog) -> dict:
         "correct": False,
         "reason": "",
     }
+    if result.status == "model_error":
+        out["reason"] = f"모델 호출 오류: {result.answer[:300]}"
+        return out
     if task.expect != "answered":
         out["correct"] = result.status == task.expect
         out["reason"] = "" if out["correct"] else f"{task.expect}이어야 하는데 {result.status}"
