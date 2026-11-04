@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 import datetime as dt
 import json
+import os
 import sys
 from pathlib import Path
 
@@ -15,11 +16,12 @@ from .tools import ToolContext, call_tool
 
 
 def _make_model(a):
-    if a.provider == "github":
-        from .github_models import DEFAULT_MODEL, GitHubModel
+    if a.provider == "ollama":
+        from .openai_compat import DEFAULT_MODEL, OLLAMA_ENDPOINT, OpenAICompatModel
 
         a.model = a.model or DEFAULT_MODEL
-        return GitHubModel(a.model, min_interval_s=a.min_interval)
+        endpoint = os.environ.get("OLLAMA_URL", OLLAMA_ENDPOINT)
+        return OpenAICompatModel(a.model, endpoint=endpoint, min_interval_s=a.min_interval)
     from .claude import DEFAULT_MODEL, ClaudeModel
 
     a.model = a.model or DEFAULT_MODEL
@@ -29,9 +31,9 @@ def _make_model(a):
 def _model_args(s: argparse.ArgumentParser) -> None:
     s.add_argument(
         "--provider",
-        default="claude",
-        choices=["claude", "github"],
-        help="claude: Anthropic API(유료) / github: GitHub Models(무료, 호출 제한)",
+        default="ollama",
+        choices=["ollama", "claude"],
+        help="ollama: 로컬 모델(무료) / claude: Anthropic API(유료)",
     )
     s.add_argument("--model", default=None, help="비우면 제공자별 기본 모델")
     s.add_argument("--min-interval", type=float, default=0.0, help="요청 사이 최소 간격(초)")
@@ -47,7 +49,6 @@ def main(argv: list[str] | None = None) -> int:
     s = sub.add_parser("load", help="manifest의 CSV를 DuckDB로 적재")
     s.add_argument("manifest")
     sub.add_parser("tables", help="테이블과 컬럼 보기")
-    sub.add_parser("models", help="GitHub Models에서 쓸 수 있는 모델 목록")
     s = sub.add_parser("check", help="SQL 검사만")
     s.add_argument("sql")
     s = sub.add_parser("run", help="SQL 검사 후 실행")
@@ -67,14 +68,6 @@ def main(argv: list[str] | None = None) -> int:
     if a.cmd == "load":
         for name, n in load_manifest(a.manifest, a.db).items():
             print(f"{name}: {n}행")
-        return 0
-
-    if a.cmd == "models":
-        from .github_models import list_models
-
-        for m in list_models():
-            caps = ",".join(m.get("capabilities") or [])
-            print(f"{m.get('id')}\t{m.get('rate_limit_tier', '')}\t{caps}")
         return 0
 
     if a.cmd == "eval":

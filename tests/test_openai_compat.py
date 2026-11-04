@@ -1,11 +1,11 @@
-"""GitHub Models 어댑터 오프라인 테스트 (가짜 HTTP)."""
+"""OpenAI 호환(Ollama) 어댑터 오프라인 테스트 (가짜 HTTP)."""
 
 import json
 
 import pytest
 
 from sql_agent.agent import run_agent
-from sql_agent.github_models import GitHubModel, GitHubModelsError, to_openai_messages
+from sql_agent.openai_compat import OpenAICompatError, OpenAICompatModel, to_openai_messages
 
 SQL = "select count(*) from customers"
 
@@ -31,13 +31,13 @@ class FakePost:
         self.bodies = []
 
     def __call__(self, url, token, body, timeout):
-        assert token == "tok" and url.endswith("/chat/completions")
+        assert url.endswith("/chat/completions")
         self.bodies.append(json.loads(json.dumps(body)))
         return self.responses.pop(0)
 
 
 def model(post, **kw):
-    return GitHubModel(token="tok", post=post, sleep=lambda s: None, **kw)
+    return OpenAICompatModel(post=post, sleep=lambda s: None, **kw)
 
 
 def test_loop_with_bad_json_then_recovery(ctx):
@@ -61,20 +61,20 @@ def test_rate_limit_retry():
     post = FakePost([(429, {"retry-after": "3"}, {"error": {"message": "slow down"}}),
                      ok(content="hi", finish="stop")])  # fmt: skip
     slept = []
-    m = GitHubModel(token="tok", post=post, sleep=slept.append)
+    m = OpenAICompatModel(post=post, sleep=slept.append)
     turn = m.complete("s", [{"role": "user", "content": "q"}], [])
     assert turn.text == "hi" and 3.0 in slept
 
 
 def test_long_wait_stops():
     post = FakePost([(429, {"retry-after": "86400"}, {"error": {"message": "daily limit"}})])
-    with pytest.raises(GitHubModelsError, match="호출 제한"):
+    with pytest.raises(OpenAICompatError, match="호출 제한"):
         model(post).complete("s", [], [])
 
 
 def test_non_retryable_error():
     post = FakePost([(403, {}, {"error": {"message": "no models permission"}})])
-    with pytest.raises(GitHubModelsError, match="403"):
+    with pytest.raises(OpenAICompatError, match="403"):
         model(post).complete("s", [], [])
 
 
@@ -84,10 +84,32 @@ def test_truncated_tool_call_dropped():
     assert turn.tool_calls == []
 
 
-def test_missing_token(monkeypatch):
-    monkeypatch.delenv("GITHUB_TOKEN", raising=False)
-    with pytest.raises(GitHubModelsError):
-        GitHubModel()
+def test_token_header_only_when_given(monkeypatch):
+    from sql_agent import openai_compat as oc
+
+    seen = {}
+
+    class R:
+        status = 200
+        headers = {}
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *a):
+            return False
+
+        def read(self):
+            return b"OK"  # GitHub Models가 실제로 돌려준 응답 형태
+
+    def fake_urlopen(req, timeout):
+        seen.update(req.headers)
+        return R()
+
+    monkeypatch.setattr(oc.urllib.request, "urlopen", fake_urlopen)
+    status, _, data = oc._post("http://x/chat/completions", "", {}, 1)
+    assert "Authorization" not in seen
+    assert status == 502 and "JSON이 아닌 응답" in data["error"]["message"]
 
 
 def test_messages_conversion_multiple_results():
