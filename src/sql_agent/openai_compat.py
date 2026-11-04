@@ -44,7 +44,8 @@ def to_openai_messages(system: str, messages: list[dict]) -> list[dict]:
         if m["role"] == "user":
             out.append({"role": "user", "content": m["content"]})
         elif m["role"] == "assistant":
-            msg: dict[str, Any] = {"role": "assistant", "content": m.get("text") or None}
+            # Ollama는 content가 null이면 400을 낸다 → 빈 문자열
+            msg: dict[str, Any] = {"role": "assistant", "content": m.get("text") or ""}
             if m.get("tool_calls"):
                 msg["tool_calls"] = [
                     {"id": c["id"], "type": "function",

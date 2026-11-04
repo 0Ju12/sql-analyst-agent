@@ -122,6 +122,6 @@ def test_messages_conversion_multiple_results():
             {"tool_call_id": "1", "name": "list_tables", "content": "{}", "is_error": False},
             {"tool_call_id": "2", "name": "describe_table", "content": "{}", "is_error": True}]},
     ])  # fmt: skip
-    assert msgs[2]["content"] is None
+    assert msgs[2]["content"] == ""  # null이면 Ollama가 400을 낸다
     assert '"고객"' in msgs[2]["tool_calls"][1]["function"]["arguments"]
     assert [m["tool_call_id"] for m in msgs[3:]] == ["1", "2"]

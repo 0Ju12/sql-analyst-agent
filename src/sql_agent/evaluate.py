@@ -6,7 +6,9 @@
   · SQL 문장이 같은지는 보지 않는다
   · 컬럼 이름·순서는 보지 않는다. 에이전트 결과에 정답의 컬럼이 모두 들어 있으면 된다(추가 컬럼 허용)
   · 행 순서는 order_matters: true인 문항만 본다
-  · 숫자는 소수 넷째 자리까지 비교한다
+  · 숫자는 소수 넷째 자리까지 비교한다. 숫자 모양의 문자열('2021')도 숫자로 본다
+- 답변 숫자 검사(answered 문항): 답변 글에 나온 숫자가 최종 SQL의 실행 결과(또는 질문)에
+  있는지 확인한다. SQL은 맞았는데 답변에 결과에 없는 숫자를 쓴 경우를 따로 센다.
 """
 
 from __future__ import annotations
@@ -14,6 +16,7 @@ from __future__ import annotations
 import datetime as dt
 import decimal
 import json
+import re
 from collections import Counter
 from collections.abc import Callable
 from dataclasses import dataclass
@@ -64,7 +67,49 @@ def _norm(v):
         return round(float(v), 4) + 0.0  # -0.0 → 0.0
     if isinstance(v, (dt.date, dt.datetime, dt.time)):
         return v.isoformat()
-    return str(v)
+    s = str(v)
+    if _NUMERIC.fullmatch(s.strip()):
+        return round(float(s), 4) + 0.0
+    return s
+
+
+_NUMERIC = re.compile(r"[-+]?\d+(\.\d+)?")
+_NUM_IN_TEXT = re.compile(r"(?<![A-Za-z0-9_.])[-+]?\d+(?:,\d{3})*(?:\.\d+)?")
+
+
+def _numbers(text: str) -> list[tuple[str, float]]:
+    out = []
+    for m in _NUM_IN_TEXT.finditer(text or ""):
+        raw = m.group(0)
+        try:
+            out.append((raw, float(raw.replace(",", ""))))
+        except ValueError:
+            continue
+    return out
+
+
+def unsupported_numbers(answer: str, rows: list[tuple], question: str = "") -> list[str]:
+    """답변에 나온 숫자 중 실행 결과·질문 어디에도 없는 것.
+
+    허용: 결과 값(소수 0~2자리 반올림 포함), 결과 속 문자열·날짜 안의 숫자, 질문 속 숫자,
+    목록 번호(1~행 수)와 행 수.
+    """
+    allowed: set[float] = {float(i) for i in range(len(rows) + 1)}
+    allowed |= {x for _, x in _numbers(question)}
+    for r in rows:
+        for v in r:
+            if isinstance(v, bool) or v is None:
+                continue
+            if isinstance(v, (int, float, decimal.Decimal)):
+                f = float(v)
+                allowed |= {f, round(f), round(f, 1), round(f, 2)}
+            else:
+                allowed |= {x for _, x in _numbers(str(v))}
+    bad = []
+    for raw, x in _numbers(answer):
+        if not any(abs(x - a) <= 0.005 + 1e-9 * abs(a) for a in allowed):
+            bad.append(raw)
+    return bad
 
 
 def compare_results(gold: list[tuple], pred: list[tuple], *, order_matters: bool) -> bool:
@@ -104,6 +149,7 @@ def score(task: Task, result: AgentResult, con, catalog) -> dict:
         "status": result.status,
         "correct": False,
         "reason": "",
+        "unsupported_numbers": None,  # answered 문항에서만 채움
     }
     if result.status == "model_error":
         out["reason"] = f"모델 호출 오류: {result.answer[:300]}"
@@ -126,6 +172,7 @@ def score(task: Task, result: AgentResult, con, catalog) -> dict:
     except Exception as e:
         out["reason"] = f"최종 SQL 실행 오류: {e}"
         return out
+    out["unsupported_numbers"] = unsupported_numbers(result.answer, pred, task.question)
     out["correct"] = compare_results(gold, pred, order_matters=task.order_matters)
     out["reason"] = "" if out["correct"] else f"결과 불일치 (정답 {len(gold)}행, 답 {len(pred)}행)"
     return out
@@ -184,18 +231,32 @@ def summarize(rows: list[dict]) -> str:
     def line(name, rs):
         n = len(rs)
         ok = sum(r["correct"] for r in rs)
+        checked = [r for r in rs if r.get("unsupported_numbers") is not None]
+        bad = sum(bool(r["unsupported_numbers"]) for r in checked)
         avg = lambda k: sum(r[k] for r in rs) / n  # noqa: E731
+        tokens = sum(r["input_tokens"] + r["output_tokens"] for r in rs)
         return (
-            f"| {name} | {ok}/{n} | {avg('steps'):.1f} | {sum(r['tool_errors'] for r in rs)} "
-            f"| {sum(r['blocked_sql'] for r in rs)} | {sum(r['input_tokens'] + r['output_tokens'] for r in rs)} |"
+            f"| {name} | {ok}/{n} | {bad}/{len(checked)} | {avg('steps'):.1f} "
+            f"| {sum(r['tool_errors'] for r in rs)} | {sum(r['blocked_sql'] for r in rs)} | {tokens} |"
         )
 
     cats = sorted({r["category"] for r in rows})
-    out = ["| 유형 | 정답 | 평균 단계 | 도구 오류 | 막힌 SQL | 토큰 |", "|---|---|---|---|---|---|"]
+    out = [
+        "| 유형 | 정답 | 답변에 근거 없는 숫자 | 평균 단계 | 도구 오류 | 막힌 SQL | 토큰 |",
+        "|---|---|---|---|---|---|---|",
+    ]
     out += [line(c, [r for r in rows if r["category"] == c]) for c in cats]
     out.append(line("전체", rows))
     wrong = [r for r in rows if not r["correct"]]
     if wrong:
         out += ["", "틀린 문항", ""]
         out += [f"- `{r['id']}` ({r['category']}): {r['reason']}" for r in wrong]
+    unfaithful = [r for r in rows if r.get("unsupported_numbers")]
+    if unfaithful:
+        out += ["", "답변에 실행 결과에 없는 숫자가 있는 문항", ""]
+        out += [
+            f"- `{r['id']}`{' (SQL은 정답)' if r['correct'] else ''}: "
+            + ", ".join(r["unsupported_numbers"][:8])
+            for r in unfaithful
+        ]
     return "\n".join(out) + "\n"

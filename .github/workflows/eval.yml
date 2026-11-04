@@ -92,6 +92,20 @@ jobs:
               print(f"    answer: {(r.get('answer') or '')[:200]}")
               if r["reason"]:
                   print(f"    reason: {r['reason']}")
+              if r.get("unsupported_numbers"):
+                  print(f"    답변에 근거 없는 숫자: {r['unsupported_numbers']}")
+              if not r["correct"]:
+                  # 틀린 문항은 도구 호출 순서를 남긴다 (결과물을 못 받는 환경에서 원인 분석용)
+                  for line2 in open(f"runs/latest/traces/{r['id']}.jsonl", encoding="utf-8"):
+                      ev = json.loads(line2)
+                      if ev["type"] == "tool":
+                          res = ev["result"]
+                          note = res.get("error") if ev["is_error"] else (
+                              f"rows={res.get('row_count')}" if "row_count" in res
+                              else f"ok={res.get('ok')}" if "ok" in res else "")
+                          print(f"      {ev['step']:>2} {ev['name']} {json.dumps(ev['args'], ensure_ascii=False)[:160]} → {str(note)[:160]}")
+                      elif ev["type"] == "model" and not ev["tool_calls"]:
+                          print(f"      {ev['step']:>2} (글로만 답함) {ev['text'][:160]!r}")
           EOF
       - name: Ollama 로그
         if: failure() && inputs.provider == 'ollama'
