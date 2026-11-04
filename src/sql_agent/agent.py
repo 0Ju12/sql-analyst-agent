@@ -39,6 +39,7 @@ class AgentResult:
     tool_calls: int = 0
     tool_errors: int = 0
     blocked_sql: int = 0  # 검사기가 막은 SQL 수
+    recovered_calls: int = 0  # 글로 쓴 도구 호출을 되살린 수
     input_tokens: int = 0
     output_tokens: int = 0
     elapsed_s: float = 0.0
@@ -84,6 +85,7 @@ def run_agent(
             log({"type": "model_error", "step": step, "error": res.answer})
             break
         res.input_tokens += turn.input_tokens
+        res.recovered_calls += turn.recovered_calls
         res.output_tokens += turn.output_tokens
         messages.append(
             {

@@ -12,7 +12,9 @@
 
 from __future__ import annotations
 
+import ast
 import json
+import re
 import time
 import urllib.error
 import urllib.request
@@ -97,7 +99,10 @@ class OpenAICompatModel:
         *,
         endpoint: str = OLLAMA_ENDPOINT,
         token: str = "",
-        max_tokens: int = 4000,
+        max_tokens: int = 1500,
+        temperature: float | None = 0.0,  # 평가 재현성을 위해 기본 0
+        seed: int | None = 42,
+        recover_text_calls: bool = True,
         max_retries: int = 4,
         min_interval_s: float = 0.0,
         timeout_s: float = 900.0,  # CPU에서 돌리는 로컬 모델은 느리다
@@ -109,6 +114,10 @@ class OpenAICompatModel:
         self.model = model
         self.name = f"openai-compat:{model}"
         self.max_tokens = max_tokens
+        self.temperature = temperature
+        self.seed = seed
+        self.recover_text_calls = recover_text_calls
+        self._tool_names: set[str] = set()
         self.max_retries = max_retries
         self.min_interval_s = min_interval_s
         self.timeout_s = timeout_s
@@ -123,6 +132,11 @@ class OpenAICompatModel:
             "tools": to_openai_tools(tools),
             "max_tokens": self.max_tokens,
         }
+        if self.temperature is not None:
+            body["temperature"] = self.temperature
+        if self.seed is not None:
+            body["seed"] = self.seed
+        self._tool_names = {t.name for t in tools}
         for attempt in range(self.max_retries + 1):
             wait = self.min_interval_s - (time.monotonic() - self._last)
             if wait > 0:
@@ -162,11 +176,71 @@ class OpenAICompatModel:
         if choice.get("finish_reason") == "length" and calls:
             calls = []
             text += "\n(응답이 max_tokens에서 잘렸습니다)"
+        recovered = 0
+        if not calls and self.recover_text_calls and text:
+            call = recover_text_tool_call(text, self._tool_names)
+            if call is not None:
+                calls, recovered = [call], 1
         usage = data.get("usage") or {}
         return ModelTurn(
             text=text,
             tool_calls=calls,
+            recovered_calls=recovered,
             input_tokens=usage.get("prompt_tokens") or 0,
             output_tokens=usage.get("completion_tokens") or 0,
             served_model=data.get("model"),
         )
+
+
+_PY_CALL = re.compile(r"\b([a-z_]+)\s*\(")
+
+
+def recover_text_tool_call(text: str, tool_names: set[str]) -> ToolCall | None:
+    """도구 호출을 글로 써 버린 응답에서 호출 하나를 되살린다 (작은 로컬 모델에서 흔함).
+
+    실제 평가에서 본 형태
+      {"name": "describe_table", "arguments": {"table": "track"}}</tool_call>
+      INAL_ANSWER {"status": "answered", "answer": "...", "sql": "..."}
+      final_answer({"status": "answered", ...})
+      final_answer(status="answered", answer="...", sql="...")
+    되살린 호출은 ModelTurn.recovered_calls로 세어 평가 결과에 따로 보고한다.
+    """
+    decoder = json.JSONDecoder()
+    for i, ch in enumerate(text):
+        if ch != "{":
+            continue
+        try:
+            obj, _ = decoder.raw_decode(text, i)
+        except json.JSONDecodeError:
+            continue
+        if not isinstance(obj, dict):
+            continue
+        name, args = obj.get("name"), obj.get("arguments")
+        if isinstance(args, str):
+            try:
+                args = json.loads(args)
+            except json.JSONDecodeError:
+                args = None
+        if name in tool_names and isinstance(args, dict):
+            return ToolCall(id="recovered_0", name=name, args=args)
+        if "final_answer" in tool_names and "status" in obj and "answer" in obj:
+            return ToolCall(id="recovered_0", name="final_answer", args=obj)
+    for m in _PY_CALL.finditer(text):
+        name = m.group(1)
+        if name not in tool_names:
+            continue
+        # 닫는 괄호 후보를 앞에서부터 하나씩 시도해 파이썬 호출식으로 읽히는 첫 구간을 쓴다
+        rest = text[m.start() :]
+        for close in [i for i, c in enumerate(rest) if c == ")"][:50]:
+            try:
+                node = ast.parse(rest[: close + 1], mode="eval").body
+            except SyntaxError:
+                continue
+            if isinstance(node, ast.Call) and not node.args and node.keywords:
+                try:
+                    kw = {k.arg: ast.literal_eval(k.value) for k in node.keywords if k.arg}
+                except ValueError:
+                    break
+                return ToolCall(id="recovered_0", name=name, args=kw)
+            break
+    return None

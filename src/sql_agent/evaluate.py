@@ -206,6 +206,7 @@ def run_eval(
                 k: getattr(result, k)
                 for k in (
                     "steps",
+                    "recovered_calls",
                     "tool_calls",
                     "tool_errors",
                     "blocked_sql",
@@ -237,13 +238,15 @@ def summarize(rows: list[dict]) -> str:
         tokens = sum(r["input_tokens"] + r["output_tokens"] for r in rs)
         return (
             f"| {name} | {ok}/{n} | {bad}/{len(checked)} | {avg('steps'):.1f} "
-            f"| {sum(r['tool_errors'] for r in rs)} | {sum(r['blocked_sql'] for r in rs)} | {tokens} |"
+            f"| {sum(r['tool_errors'] for r in rs)} | {sum(r['blocked_sql'] for r in rs)} "
+            f"| {sum(r.get('recovered_calls', 0) for r in rs)} | {tokens} |"
         )
 
     cats = sorted({r["category"] for r in rows})
     out = [
-        "| 유형 | 정답 | 답변에 근거 없는 숫자 | 평균 단계 | 도구 오류 | 막힌 SQL | 토큰 |",
-        "|---|---|---|---|---|---|---|",
+        "| 유형 | 정답 | 답변에 근거 없는 숫자 | 평균 단계 | 도구 오류 | 막힌 SQL "
+        "| 글로 쓴 호출 복구 | 토큰 |",
+        "|---|---|---|---|---|---|---|---|",
     ]
     out += [line(c, [r for r in rows if r["category"] == c]) for c in cats]
     out.append(line("전체", rows))

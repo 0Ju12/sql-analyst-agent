@@ -87,7 +87,7 @@ jobs:
               r = json.loads(line)
               mark = "O" if r["correct"] else "X"
               print(f"[{mark}] {r['id']} status={r['status']} steps={r['steps']} "
-                    f"tool_errors={r['tool_errors']} elapsed={r['elapsed_s']}s")
+                    f"tool_errors={r['tool_errors']} recovered={r.get('recovered_calls', 0)} elapsed={r['elapsed_s']}s")
               print(f"    sql: {r.get('sql')}")
               print(f"    answer: {(r.get('answer') or '')[:200]}")
               if r["reason"]:

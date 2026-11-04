@@ -34,7 +34,8 @@ class ModelTurn:
     input_tokens: int = 0
     output_tokens: int = 0
     raw: Any = None  # 제공자 원본 응답 블록 (다음 요청에 그대로 돌려보내야 하는 경우)
-    served_model: str | None = None  # 실제로 응답한 모델 (대체 모델로 넘어간 경우 확인용)
+    served_model: str | None = None
+    recovered_calls: int = 0  # 글로 쓴 도구 호출을 어댑터가 되살린 수  # 실제로 응답한 모델 (대체 모델로 넘어간 경우 확인용)
 
 
 class Model(Protocol):

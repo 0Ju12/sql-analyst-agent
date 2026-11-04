@@ -125,3 +125,44 @@ def test_messages_conversion_multiple_results():
     assert msgs[2]["content"] == ""  # null이면 Ollama가 400을 낸다
     assert '"고객"' in msgs[2]["tool_calls"][1]["function"]["arguments"]
     assert [m["tool_call_id"] for m in msgs[3:]] == ["1", "2"]
+
+
+TOOLS_SET = {"list_tables", "describe_table", "run_sql", "final_answer"}
+
+
+@pytest.mark.parametrize(
+    "text, name, key",
+    [
+        # 실제 평가 로그에서 나온 형태들
+        ('leton\n{"name": "describe_table", "arguments": {"table": "track"}}\n</tool_call>',
+         "describe_table", "table"),
+        ('INAL\n{"status": "answered", "answer": "총 246 건", "sql": "SELECT 1"}',
+         "final_answer", "sql"),
+        ('final_answer({"status": "answered", "answer": "59명", "sql": "SELECT COUNT(*) FROM customer"})',
+         "final_answer", "sql"),
+        ('final_answer(\n    status="answered",\n    answer="1. id: 6\\n2. id: 26",\n    sql="SELECT 1"\n)',
+         "final_answer", "answer"),
+    ],
+)  # fmt: skip
+def test_recover_text_tool_call(text, name, key):
+    from sql_agent.openai_compat import recover_text_tool_call
+
+    call = recover_text_tool_call(text, TOOLS_SET)
+    assert call is not None and call.name == name and key in call.args
+
+
+def test_no_recovery_from_plain_text():
+    from sql_agent.openai_compat import recover_text_tool_call
+
+    assert recover_text_tool_call("고객은 59명입니다. (참고: 표 1)", TOOLS_SET) is None
+    assert recover_text_tool_call('{"unknown": 1} drop_table(x="y")', TOOLS_SET) is None
+
+
+def test_recovered_call_counted_and_sampling_fixed(ctx):
+    sql = "select count(*) from customers"
+    args = {"status": "answered", "answer": "4", "sql": sql}
+    text = json.dumps({"name": "final_answer", "arguments": args})
+    post = FakePost([ok(content=text, finish="stop")])
+    r = run_agent("고객 수?", model(post), ctx)
+    assert r.status == "answered" and r.recovered_calls == 1
+    assert post.bodies[0]["temperature"] == 0.0 and post.bodies[0]["seed"] == 42
