@@ -1,0 +1,38 @@
+[build-system]
+requires = ["setuptools>=69"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "sql-analyst-agent"
+version = "0.1.0"
+description = "질문을 받으면 테이블을 살펴보고 SQL을 검사·실행해 근거와 함께 답하는 데이터 분석 에이전트"
+readme = "README.md"
+requires-python = ">=3.11"
+license = "MIT"
+dependencies = [
+  "duckdb>=1.1",
+  "sqlglot>=25",
+  "pyyaml>=6",
+  "matplotlib>=3.8",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=8", "ruff>=0.6"]
+
+[project.scripts]
+sql-agent = "sql_agent.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "B", "UP"]
+# 줄 길이는 formatter가 맞춘다. 한국어 문자열은 억지로 자르지 않음
+ignore = ["E501"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

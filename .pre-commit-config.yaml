@@ -1,0 +1,18 @@
+# 설치: pip install pre-commit && pre-commit install
+repos:
+  - repo: https://github.com/gitleaks/gitleaks
+    rev: v8.18.4
+    hooks:
+      - id: gitleaks
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.6.9
+    hooks:
+      - id: ruff
+      - id: ruff-format
+  - repo: local
+    hooks:
+      - id: forbidden-files
+        name: 금지 파일 검사
+        entry: bash scripts/check_forbidden_files.sh
+        language: system
+        pass_filenames: false
