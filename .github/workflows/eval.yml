@@ -27,6 +27,9 @@ on:
       list_models:
         description: true면 GitHub Models 모델 목록만 출력
         default: "false"
+      probe:
+        description: true면 GitHub Models 연결 진단만 실행
+        default: "false"
 
 permissions:
   contents: read
@@ -44,13 +47,30 @@ jobs:
         with:
           python-version: "3.12"
       - run: pip install -e '.[claude]'
+      - name: 연결 진단
+        if: inputs.probe == 'true'
+        run: |
+          body='{"model":"openai/gpt-4.1-mini","messages":[{"role":"user","content":"say hi"}],"max_tokens":5}'
+          for url in https://models.github.ai/inference/chat/completions \
+                     https://models.inference.ai.azure.com/chat/completions; do
+            for accept in application/json application/vnd.github+json; do
+              echo "=== POST $url (Accept: $accept)"
+              curl -sS -i -m 30 -X POST "$url" -H "Authorization: Bearer $GITHUB_TOKEN" \
+                -H "Accept: $accept" -H "X-GitHub-Api-Version: 2022-11-28" \
+                -H "Content-Type: application/json" -d "$body" | head -c 1500; echo
+            done
+          done
+          echo "=== GET catalog"
+          curl -sS -i -m 30 https://models.github.ai/catalog/models \
+            -H "Authorization: Bearer $GITHUB_TOKEN" -H "Accept: application/vnd.github+json" \
+            -H "X-GitHub-Api-Version: 2022-11-28" | head -c 1500; echo
       - name: 모델 목록
         if: inputs.list_models == 'true'
         run: sql-agent models | tee -a "$GITHUB_STEP_SUMMARY"
       - run: python scripts/fetch_chinook.py
-        if: inputs.list_models != 'true'
+        if: inputs.list_models != 'true' && inputs.probe != 'true'
       - name: 평가
-        if: inputs.list_models != 'true'
+        if: inputs.list_models != 'true' && inputs.probe != 'true'
         env:
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
         run: |
@@ -65,7 +85,7 @@ jobs:
             --only "${{ inputs.only }}" --limit "${{ inputs.limit }}" --out runs/latest
           cat runs/latest/summary.md >> "$GITHUB_STEP_SUMMARY"
       - uses: actions/upload-artifact@v4
-        if: always() && inputs.list_models != 'true'
+        if: always() && inputs.list_models != 'true' && inputs.probe != 'true'
         with:
           name: eval-${{ inputs.provider }}-${{ github.run_id }}
           path: runs/latest/
