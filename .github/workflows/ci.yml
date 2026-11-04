@@ -35,7 +35,9 @@ jobs:
       - run: pip install -e '.[dev]'
       - run: ruff check .
       - run: ruff format --check .
-      - run: pytest -q
+      - name: 예제 DB(Chinook) 받기 — 평가 문항 정답 SQL 검증용
+        run: python scripts/fetch_chinook.py
+      - run: pytest -q -rs
 
   docker:
     name: Docker 이미지 빌드

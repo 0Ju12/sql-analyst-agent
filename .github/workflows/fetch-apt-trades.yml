@@ -1,0 +1,46 @@
+name: 아파트 실거래가 수집
+
+# 수동 실행: Actions 탭 → "아파트 실거래가 수집" → Run workflow
+# 필요: 저장소 Secrets에 DATA_GO_KR_KEY (공공데이터포털 Decoding 키)
+# 선택: 저장소 Variables에 APT_TRADE_URL (엔드포인트를 바꿔야 할 때)
+on:
+  workflow_dispatch:
+    inputs:
+      start:
+        description: 시작 연월 (YYYYMM)
+        default: "202401"
+      end:
+        description: 끝 연월 (YYYYMM)
+        default: "202412"
+      regions:
+        description: 법정동코드 5자리 (쉼표 구분, 비우면 서울 25개 구)
+        default: ""
+
+permissions:
+  contents: read
+
+jobs:
+  fetch:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: 수집
+        env:
+          DATA_GO_KR_KEY: ${{ secrets.DATA_GO_KR_KEY }}
+          APT_TRADE_URL: ${{ vars.APT_TRADE_URL }}
+        run: |
+          args="--start ${{ inputs.start }} --end ${{ inputs.end }}"
+          if [ -n "${{ inputs.regions }}" ]; then args="$args --regions ${{ inputs.regions }}"; fi
+          python scripts/fetch_apt_trades.py $args
+      - name: 결과 올리기
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: apt-trades-${{ inputs.start }}-${{ inputs.end }}
+          path: data/raw/apt/
+          if-no-files-found: warn
+          retention-days: 30
