@@ -3,13 +3,13 @@
 데이터에 대해 질문하면 에이전트가 테이블을 살펴보고, SQL을 짜서 **실행 전에 검사**하고, 오류가 나면 스스로 고쳐서
 근거 SQL과 함께 답하는 데이터 분석 에이전트입니다. 같은 과정을 질문 세트로 **평가**합니다.
 
-> 진행 상황: 도구·안전장치·에이전트 루프·채점기·평가 문항 30개·Claude 어댑터까지 만들고, 가짜 모델·가짜 클라이언트로 검증했습니다.
-> 실제 Claude 모델로 돌린 평가 결과는 아직 없습니다.
+> 진행 상황: 도구·안전장치·에이전트 루프·채점기·평가 문항 30개와 모델 어댑터(Ollama, Claude)를 만들었습니다.
+> 무료 모델(Ollama qwen2.5:7b)로 GitHub Actions에서 실제 평가를 돌리는 중입니다.
 
 ## 구조
 
 ```
-질문 → [에이전트 루프] ⇄ 모델 (Claude / 테스트용 ScriptedModel / 이후 Ollama)
+질문 → [에이전트 루프] ⇄ 모델 (Ollama 로컬 모델 / Claude / 테스트용 ScriptedModel)
             ├─ list_tables      테이블 목록
             ├─ describe_table   컬럼·자료형·행 수·예시 5행
             ├─ check_sql        실행 없이 검사
@@ -27,6 +27,7 @@
 | `src/sql_agent/sql_guard.py` | sqlglot 기반 SQL 검사 |
 | `src/sql_agent/db.py` | 읽기 전용 DuckDB 연결, 시간 제한·행 수 제한 실행 |
 | `src/sql_agent/models.py` | 모델 공통 인터페이스, 테스트용 ScriptedModel |
+| `src/sql_agent/openai_compat.py` | OpenAI 호환 어댑터 — 기본은 로컬 Ollama (무료) |
 | `src/sql_agent/claude.py` | Claude 어댑터 (Messages API 수동 도구 루프) |
 | `src/sql_agent/evaluate.py` | 질문 세트 실행·채점·요약 보고서 |
 | `src/sql_agent/load.py` | CSV → DuckDB 적재 (manifest YAML) |
@@ -106,25 +107,31 @@ sql-agent --db data/warehouse.duckdb check "select nam from customers"
 sql-agent --db data/warehouse.duckdb run "select city, count(*) from customers group by city"
 ```
 
-### Claude로 실행
+### 모델로 실행
+
+**무료: Ollama (기본값)** — 공개 모델을 내 컴퓨터나 GitHub Actions 러너에서 직접 돌립니다. 키·비용이 없습니다.
 
 ```bash
-pip install -e '.[claude]'
-export ANTHROPIC_API_KEY=...   # 셸 환경변수로만. 파일에 쓰지 않기
+ollama pull qwen2.5:7b
+OLLAMA_CONTEXT_LENGTH=16384 ollama serve   # 기본 문맥 길이는 짧아 도구 정의가 잘릴 수 있음
 sql-agent --db data/chinook.duckdb ask "장르별 판매 금액 상위 3개는?"
-sql-agent --db data/chinook.duckdb eval eval/chinook_tasks.yaml --effort medium
+sql-agent --db data/chinook.duckdb eval eval/chinook_tasks.yaml
 ```
 
-- 기본 모델 `claude-opus-5-5`, effort `medium`. `--model`, `--effort`로 바꿉니다.
-- 안전 분류기가 요청을 거절하면 서버 쪽 대체 모델이 이어받습니다(`fallbacks: "default"`). 끄려면 `--no-fallbacks`. 실제로 응답한 모델은 실행 기록의 `served_model`에 남습니다.
-- 모델 응답 블록은 다음 요청에 그대로 돌려보내고, 대화 기록은 덧붙이기만 합니다. 도구 정의와 시스템 프롬프트는 프롬프트 캐시를 씁니다.
-- GitHub Actions의 "에이전트 평가" 워크플로로도 돌릴 수 있습니다(저장소 Secrets의 `ANTHROPIC_API_KEY` 사용, 결과는 Actions 결과물로 저장).
+GitHub Actions의 "에이전트 평가" 워크플로는 러너(CPU)에 Ollama를 설치해 같은 평가를 돌립니다. 7B 모델 기준 문항당 2~3분 걸립니다.
+
+**유료: Claude** — `pip install -e '.[claude]'`, `ANTHROPIC_API_KEY` 환경변수, `--provider claude`.
+- 기본 모델 `claude-opus-5-5`, effort `medium` (`--model`, `--effort`로 변경).
+- 안전 분류기가 거절하면 서버 쪽 대체 모델이 이어받습니다(`fallbacks: "default"`, 끄려면 `--no-fallbacks`). 실제로 응답한 모델은 실행 기록의 `served_model`에 남습니다.
+- 모델 응답 블록은 다음 요청에 그대로 돌려보내고, 대화 기록은 덧붙이기만 합니다.
+
+참고: 무료 선택지로 GitHub Models도 시도했지만, 2026-11-04에 Actions에서 확인했을 때 추론·모델 목록 요청 모두 `OK`라는 글자만 돌려줘 쓸 수 없었습니다.
 
 ## 다음 단계
 
 - 실거래가 첫 수집 후 정리 단계와 한국어 평가 문항
-- 실제 Claude 모델 평가 실행 (effort별 비교)
-- 틀린 문항 분석과 개선, 로컬 모델(Ollama) 비교
+- 무료 모델(Ollama) 30문항 평가 결과 정리, 모델 크기별 비교
+- 틀린 문항 분석과 개선
 
 ## 저장소 규칙
 
