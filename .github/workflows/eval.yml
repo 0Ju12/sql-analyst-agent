@@ -1,15 +1,19 @@
 name: 에이전트 평가
 
 # 수동 실행: Actions 탭 → "에이전트 평가" → Run workflow
-# 필요: 저장소 Secrets에 ANTHROPIC_API_KEY
+# - provider=github: GitHub Models (무료, 키 불필요, 호출 제한 있음)
+# - provider=claude: Anthropic API (유료, Secrets의 ANTHROPIC_API_KEY 필요)
 on:
   workflow_dispatch:
     inputs:
+      provider:
+        description: github / claude
+        default: github
       model:
-        description: 모델 ID
-        default: claude-opus-5-5
+        description: 모델 ID (비우면 제공자별 기본값)
+        default: ""
       effort:
-        description: low / medium / high / xhigh / max
+        description: "claude 전용: low / medium / high / xhigh / max"
         default: medium
       only:
         description: 문항 id (쉼표 구분, 비우면 전체)
@@ -17,34 +21,53 @@ on:
       limit:
         description: 앞에서부터 N문항만 (0이면 전체)
         default: "0"
+      min_interval:
+        description: 요청 사이 최소 간격(초) — 호출 제한 대비
+        default: "4"
+      list_models:
+        description: true면 GitHub Models 모델 목록만 출력
+        default: "false"
 
 permissions:
   contents: read
+  models: read
 
 jobs:
   eval:
     runs-on: ubuntu-latest
-    timeout-minutes: 60
+    timeout-minutes: 90
+    env:
+      GITHUB_TOKEN: ${{ github.token }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
       - run: pip install -e '.[claude]'
+      - name: 모델 목록
+        if: inputs.list_models == 'true'
+        run: sql-agent models | tee -a "$GITHUB_STEP_SUMMARY"
       - run: python scripts/fetch_chinook.py
+        if: inputs.list_models != 'true'
       - name: 평가
+        if: inputs.list_models != 'true'
         env:
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
         run: |
-          if [ -z "$ANTHROPIC_API_KEY" ]; then echo "ANTHROPIC_API_KEY가 없습니다."; exit 2; fi
+          if [ "${{ inputs.provider }}" = "claude" ] && [ -z "$ANTHROPIC_API_KEY" ]; then
+            echo "ANTHROPIC_API_KEY가 없습니다."; exit 2
+          fi
+          model_arg=()
+          if [ -n "${{ inputs.model }}" ]; then model_arg=(--model "${{ inputs.model }}"); fi
           sql-agent --db data/chinook.duckdb eval eval/chinook_tasks.yaml \
-            --model "${{ inputs.model }}" --effort "${{ inputs.effort }}" \
+            --provider "${{ inputs.provider }}" "${model_arg[@]}" --effort "${{ inputs.effort }}" \
+            --min-interval "${{ inputs.min_interval }}" \
             --only "${{ inputs.only }}" --limit "${{ inputs.limit }}" --out runs/latest
           cat runs/latest/summary.md >> "$GITHUB_STEP_SUMMARY"
       - uses: actions/upload-artifact@v4
-        if: always()
+        if: always() && inputs.list_models != 'true'
         with:
-          name: eval-${{ inputs.model }}-${{ inputs.effort }}-${{ github.run_id }}
+          name: eval-${{ inputs.provider }}-${{ github.run_id }}
           path: runs/latest/
           if-no-files-found: warn
           retention-days: 30
